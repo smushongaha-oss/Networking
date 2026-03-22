@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<title>Free WiFi Finder — Worldwide</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root {
+    --bg:#090f14; --surface:#0e1a23; --card:#111d28;
+    --border:rgba(255,255,255,0.07); --teal:#00d4aa; --cyan:#00b8ff;
+    --text:#e8f4f8; --muted:#5a7a8a; --tag-bg:rgba(255,255,255,0.06);
+  }
+  body { background:var(--bg); color:var(--text); font-family:'DM Sans',sans-serif; height:100vh; overflow:hidden; display:flex; flex-direction:column; }
+  body::before {
+    content:''; position:fixed; inset:0;
+    background-image:linear-gradient(rgba(0,212,170,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,170,0.03) 1px,transparent 1px);
+    background-size:60px 60px; pointer-events:none; z-index:0;
+  }
+
+  /* Header */
+  .header { padding:12px 16px; display:flex; align-items:center; gap:12px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; z-index:1000; position:relative; }
+  .live-badge { display:inline-flex; align-items:center; gap:6px; background:rgba(0,212,170,.08); border:1px solid rgba(0,212,170,.25); border-radius:100px; padding:4px 11px; font-size:10px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--teal); flex-shrink:0; }
+  .live-dot { width:5px; height:5px; background:var(--teal); border-radius:50%; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  h1 { font-family:'Syne',sans-serif; font-size:17px; font-weight:800; white-space:nowrap; }
+  h1 .green { color:var(--teal); } h1 .blue { color:var(--cyan); }
+  .view-toggle { display:flex; background:rgba(255,255,255,.05); border:1px solid var(--border); border-radius:8px; overflow:hidden; flex-shrink:0; margin-left:auto; }
+  .toggle-btn { padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--muted); font-family:'DM Sans',sans-serif; transition:all .2s; }
+  .toggle-btn.active { background:rgba(0,212,170,.15); color:var(--teal); }
+
+  /* Main */
+  .main { flex:1; display:flex; overflow:hidden; position:relative; z-index:1; }
+
+  /* Sidebar */
+  .sidebar { width:320px; flex-shrink:0; display:flex; flex-direction:column; background:var(--bg); border-right:1px solid var(--border); overflow:hidden; transition:width .3s; }
+  .sidebar.collapsed { width:0; }
+  .sidebar-inner { width:320px; display:flex; flex-direction:column; height:100%; overflow:hidden; }
+  .sidebar-top { padding:12px; flex-shrink:0; border-bottom:1px solid var(--border); }
+  .stats-bar { display:flex; gap:16px; align-items:center; padding:0 2px; margin-bottom:10px; }
+  .stat-val { font-family:'Syne',sans-serif; font-size:18px; font-weight:800; color:var(--teal); text-align:center; }
+  .stat-label { font-size:9px; letter-spacing:.1em; color:var(--muted); text-align:center; margin-top:1px; text-transform:uppercase; }
+  .search-wrap { position:relative; margin-bottom:10px; }
+  .search-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:13px; }
+  #searchInput { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 10px 10px 36px; font-size:13px; color:var(--text); font-family:'DM Sans',sans-serif; outline:none; transition:border-color .2s; }
+  #searchInput:focus { border-color:rgba(0,212,170,.4); }
+  #searchInput::placeholder { color:var(--muted); }
+  .filter-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  .filter-btn { background:var(--tag-bg); border:1px solid var(--border); border-radius:100px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer; transition:all .2s; font-family:'DM Sans',sans-serif; }
+  .filter-btn:hover { border-color:rgba(0,212,170,.3); }
+  .filter-btn.active { background:rgba(0,212,170,.12); border-color:var(--teal); color:var(--teal); }
+  #countrySelect { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:12px; color:var(--text); font-family:'DM Sans',sans-serif; outline:none; cursor:pointer; }
+  #countrySelect option { background:#0e1a23; }
+
+  /* Spot list */
+  .spot-list { flex:1; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:8px; }
+  .spot-list::-webkit-scrollbar { width:4px; }
+  .spot-list::-webkit-scrollbar-track { background:transparent; }
+  .spot-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+  .spot-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; cursor:pointer; transition:all .2s; animation:fadeIn .2s ease both; }
+  .spot-card:hover, .spot-card.active { border-color:rgba(0,212,170,.4); background:rgba(0,212,170,.04); }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+  .spot-top { display:flex; justify-content:space-between; align-items:flex-start; gap:6px; margin-bottom:4px; }
+  .spot-name { font-family:'Syne',sans-serif; font-size:13px; font-weight:700; }
+  .spot-badge { font-size:9px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; padding:2px 7px; border-radius:100px; flex-shrink:0; }
+  .spot-loc { font-size:11px; color:var(--muted); margin-bottom:6px; }
+  .spot-meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .meta-chip { font-size:11px; color:var(--muted); display:flex; align-items:center; gap:3px; }
+  .pwd { display:inline-flex; align-items:center; gap:4px; background:rgba(0,184,255,.08); border:1px solid rgba(0,184,255,.15); border-radius:6px; padding:2px 7px; font-size:10px; color:var(--cyan); margin-top:5px; }
+  .results-info { padding:6px 12px; font-size:11px; color:var(--muted); flex-shrink:0; border-top:1px solid var(--border); }
+
+  /* Map */
+  .map-wrap { flex:1; position:relative; }
+  #map { width:100%; height:100%; }
+  .leaflet-container { background:#090f14 !important; }
+  .leaflet-popup-content-wrapper { background:#111d28 !important; border:1px solid rgba(0,212,170,.3) !important; border-radius:12px !important; color:#e8f4f8 !important; box-shadow:0 8px 32px rgba(0,0,0,.6) !important; }
+  .leaflet-popup-tip { background:#111d28 !important; }
+  .leaflet-popup-content { margin:12px 14px !important; font-family:'DM Sans',sans-serif; }
+  .popup-name { font-family:'Syne',sans-serif; font-size:14px; font-weight:700; margin-bottom:4px; }
+  .popup-loc { font-size:11px; color:#5a7a8a; margin-bottom:8px; }
+  .popup-net { font-size:12px; color:#00d4aa; margin-bottom:4px; }
+  .popup-notes { font-size:11px; color:#4a7080; margin-top:4px; }
+  .popup-pwd { display:inline-flex; align-items:center; gap:4px; background:rgba(0,184,255,.1); border:1px solid rgba(0,184,255,.2); border-radius:6px; padding:3px 8px; font-size:11px; color:#00b8ff; margin-top:6px; }
+
+  .sidebar-toggle { position:absolute; bottom:20px; left:20px; z-index:1000; background:#111d28; border:1px solid rgba(0,212,170,.3); border-radius:10px; padding:8px 14px; font-size:12px; font-weight:600; color:#00d4aa; cursor:pointer; font-family:'DM Sans',sans-serif; display:flex; align-items:center; gap:6px; box-shadow:0 4px 20px rgba(0,0,0,.4); }
+  .sidebar-toggle:hover { background:rgba(0,212,170,.1); }
+
+  /* List view */
+  #listView { flex:1; overflow-y:auto; padding:16px; display:none; flex-wrap:wrap; gap:10px; align-content:flex-start; background:var(--bg); }
+  #listView .spot-card { width:calc(50% - 5px); min-width:260px; flex:1; }
+  #listView .spot-card { animation-delay:0s !important; }
+  #listView::-webkit-scrollbar { width:4px; }
+  #listView::-webkit-scrollbar-track { background:transparent; }
+  #listView::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+
+  .pro-tip { background:rgba(0,184,255,.05); border-top:1px solid rgba(0,184,255,.1); padding:10px 16px; font-size:11px; color:#8ab8cc; flex-shrink:0; }
+  .pro-tip strong { color:#00b8ff; }
+
+  /* Groq panel */
+  .groq-panel { background:var(--surface); border-bottom:1px solid var(--border); padding:10px 14px; flex-shrink:0; z-index:999; position:relative; }
+  .groq-label { font-size:10px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--teal); margin-bottom:7px; display:flex; align-items:center; gap:6px; }
+  .groq-label .groq-dot { width:6px; height:6px; background:var(--teal); border-radius:50%; animation:pulse 2s infinite; }
+  .groq-row { display:flex; gap:7px; align-items:center; }
+  .groq-input { flex:1; background:var(--card); border:1px solid var(--border); border-radius:9px; padding:8px 12px; font-size:13px; color:var(--text); font-family:'DM Sans',sans-serif; outline:none; transition:border-color .2s; }
+  .groq-input:focus { border-color:rgba(0,212,170,.4); }
+  .groq-input::placeholder { color:var(--muted); }
+  .groq-btn { background:linear-gradient(135deg,rgba(0,212,170,.2),rgba(0,184,255,.15)); border:1px solid rgba(0,212,170,.4); border-radius:9px; padding:8px 14px; font-size:12px; font-weight:700; color:var(--teal); cursor:pointer; font-family:'DM Sans',sans-serif; white-space:nowrap; transition:all .2s; }
+  .groq-btn:hover:not(:disabled) { background:linear-gradient(135deg,rgba(0,212,170,.3),rgba(0,184,255,.25)); }
+  .groq-btn:disabled { opacity:.5; cursor:not-allowed; }
+  .groq-key-row { display:flex; gap:7px; align-items:center; margin-bottom:7px; }
+  .groq-key-input { flex:1; background:var(--card); border:1px solid var(--border); border-radius:9px; padding:7px 12px; font-size:12px; color:var(--text); font-family:'DM Sans',sans-serif; outline:none; transition:border-color .2s; }
+  .groq-key-input:focus { border-color:rgba(0,212,170,.4); }
+  .groq-key-input::placeholder { color:var(--muted); }
+  .groq-status { font-size:11px; color:var(--muted); margin-top:6px; min-height:16px; transition:color .3s; }
+  .groq-status.ok { color:var(--teal); }
+  .groq-status.err { color:#e05555; }
+  .groq-status.loading { color:var(--cyan); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="live-badge"><span class="live-dot"></span>LIVE · WORLDWIDE</div>
+  <h1>Find <span class="green">Free</span> <span class="blue">WiFi</span> Worldwide</h1>
+  <div class="view-toggle">
+    <button class="toggle-btn active" id="btnMap" onclick="switchView('map')">🗺 Map</button>
+    <button class="toggle-btn" id="btnList" onclick="switchView('list')">☰ List</button>
+  </div>
+</div>
+
+<div class="groq-panel">
+  <div class="groq-label"><span class="groq-dot"></span>AI WiFi Search — Powered by Groq</div>
+  <div class="groq-key-row">
+    <input class="groq-key-input" id="groqKey" type="password" placeholder="🔑 Paste your Groq API key (console.groq.com)">
+    <button class="groq-btn" onclick="saveKey()">Save Key</button>
+  </div>
+  <div class="groq-row">
+    <input class="groq-input" id="groqCity" type="text" placeholder="🌍 Search any city — e.g. Tokyo, Berlin, Lagos..." onkeydown="if(event.key==='Enter')searchGroq()">
+    <button class="groq-btn" id="groqBtn" onclick="searchGroq()">✨ Find WiFi</button>
+  </div>
+  <div class="groq-status" id="groqStatus">Enter your Groq API key and search any city to discover free WiFi spots.</div>
+</div>
+
+
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-inner">
+      <div class="sidebar-top">
+        <div class="stats-bar">
+          <div class="stat"><div class="stat-val" id="statSpots">—</div><div class="stat-label">Spots</div></div>
+          <div class="stat"><div class="stat-val" id="statCountries">—</div><div class="stat-label">Countries</div></div>
+          <div class="stat"><div class="stat-val" style="color:var(--cyan)">100%</div><div class="stat-label">Free</div></div>
+        </div>
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input id="searchInput" type="text" placeholder="Search name, city, network..." oninput="filterSpots()">
+        </div>
+        <div class="filter-row" id="filters"></div>
+        <select id="countrySelect" onchange="filterSpots()">
+          <option value="">🌍 All Countries</option>
+        </select>
+      </div>
+      <div class="spot-list" id="spotList"></div>
+      <div class="results-info" id="resultsInfo"></div>
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div class="map-wrap" id="mapWrap">
+    <div id="map"></div>
+    <button class="sidebar-toggle" onclick="toggleSidebar()">
+      <span id="toggleIcon">◀</span> <span id="toggleLabel">Hide Panel</span>
+    </button>
+  </div>
+
+  <!-- List view -->
+  <div id="listView"></div>
+</div>
+
+<div class="pro-tip" id="proTip">
+  <strong>Pro tip:</strong> At captive portals (airports, malls, hotels), connect then open any browser — a login page appears automatically. Airport sessions often reset hourly — just reconnect. Hotel lobbies usually have open WiFi even without a room booking.
+</div>
+
+<script>
+const SPOTS = [
+  // 🇴🇲 Oman
+  { name:"The Coffee Club", city:"Muscat", country:"Oman", flag:"🇴🇲", type:"Cafes", network:"CoffeeClub_Free", password:null, speed:"Fast", notes:"Good speed, open all day", lat:23.5957, lng:58.3927 },
+  { name:"Caribou Coffee", city:"Qurum", country:"Oman", flag:"🇴🇲", type:"Cafes", network:"Caribou_Guest", password:null, speed:"Fast", notes:"Reliable, buy a drink", lat:23.5880, lng:58.3940 },
+  { name:"Costa Coffee", city:"Al Mouj", country:"Oman", flag:"🇴🇲", type:"Cafes", network:"Costa_WiFi", password:null, speed:"Fast", notes:"Multiple Muscat locations", lat:23.6097, lng:58.5073 },
+  { name:"Starbucks Muscat", city:"Muscat Grand Mall", country:"Oman", flag:"🇴🇲", type:"Cafes", network:"Google Starbucks", password:null, speed:"Fast", notes:"Sign in via Google", lat:23.5921, lng:58.1766 },
+  { name:"Pinkberry Muscat", city:"Muscat Hills", country:"Oman", flag:"🇴🇲", type:"Cafes", network:"Pinkberry_WiFi", password:null, speed:"Medium", notes:"Ask staff for password", lat:23.5965, lng:58.4012 },
+  { name:"City Centre Muscat", city:"Al Khuwair", country:"Oman", flag:"🇴🇲", type:"Malls", network:"CCM_FreeWiFi", password:null, speed:"Medium", notes:"Captive portal, 2hr sessions", lat:23.5957, lng:58.3927 },
+  { name:"Muscat Grand Mall", city:"Al Seeb", country:"Oman", flag:"🇴🇲", type:"Malls", network:"MGM_Guest", password:null, speed:"Medium", notes:"Register with phone number", lat:23.5921, lng:58.1766 },
+  { name:"Avenues Mall", city:"Al Ghubra", country:"Oman", flag:"🇴🇲", type:"Malls", network:"AvenuesMall_Free", password:null, speed:"Medium", notes:"Unlimited, captive portal", lat:23.6050, lng:58.4200 },
+  { name:"Sabco Commercial Centre", city:"Qurum", country:"Oman", flag:"🇴🇲", type:"Malls", network:"Sabco_WiFi", password:null, speed:"Slow", notes:"Basic browsing only", lat:23.5875, lng:58.3950 },
+  { name:"Crowne Plaza Muscat", city:"Qurum", country:"Oman", flag:"🇴🇲", type:"Hotels", network:"CrownePlaza_Lobby", password:null, speed:"Fast", notes:"Lobby WiFi is free", lat:23.5870, lng:58.3960 },
+  { name:"Hyatt Regency Muscat", city:"Al Shatti", country:"Oman", flag:"🇴🇲", type:"Hotels", network:"Hyatt_Public", password:null, speed:"Fast", notes:"Lobby and pool area", lat:23.6080, lng:58.4900 },
+  { name:"Park Inn by Radisson", city:"Al Ghubra", country:"Oman", flag:"🇴🇲", type:"Hotels", network:"ParkInn_Guest", password:"parkinn2024", speed:"Fast", notes:"Ask at reception for daily code", lat:23.6030, lng:58.4230 },
+  { name:"Muscat International Airport", city:"Seeb", country:"Oman", flag:"🇴🇲", type:"Airport", network:"MCT_Airport_Free", password:null, speed:"Fast", notes:"Sessions reset hourly — reconnect for unlimited", lat:23.5933, lng:58.2844 },
+  { name:"Sultan Qaboos University Library", city:"Al Khoud", country:"Oman", flag:"🇴🇲", type:"Libraries", network:"SQU_Public", password:null, speed:"Fast", notes:"Public reading area WiFi", lat:23.5726, lng:58.1594 },
+  { name:"Muscat Public Library", city:"Qurum", country:"Oman", flag:"🇴🇲", type:"Libraries", network:"MuscatLib_Free", password:null, speed:"Medium", notes:"Register at front desk", lat:23.5890, lng:58.3970 },
+  // 🇦🇪 UAE
+  { name:"Dubai Mall", city:"Dubai", country:"UAE", flag:"🇦🇪", type:"Malls", network:"DubaiMall_Free", password:null, speed:"Fast", notes:"Register with phone, 4hr sessions", lat:25.1980, lng:55.2796 },
+  { name:"Mall of the Emirates", city:"Dubai", country:"UAE", flag:"🇦🇪", type:"Malls", network:"MOE_WiFi", password:null, speed:"Fast", notes:"Captive portal registration", lat:25.1183, lng:55.2003 },
+  { name:"Dubai International Airport", city:"Dubai", country:"UAE", flag:"🇦🇪", type:"Airport", network:"DXB_FREE_WIFI", password:null, speed:"Fast", notes:"Unlimited, sign in with email", lat:25.2528, lng:55.3644 },
+  { name:"Abu Dhabi International Airport", city:"Abu Dhabi", country:"UAE", flag:"🇦🇪", type:"Airport", network:"ADAC_FreeWifi", password:null, speed:"Fast", notes:"Free, register once", lat:24.4330, lng:54.6511 },
+  { name:"Starbucks Dubai Marina", city:"Dubai Marina", country:"UAE", flag:"🇦🇪", type:"Cafes", network:"Google Starbucks", password:null, speed:"Fast", notes:"Google login required", lat:25.0657, lng:55.1337 },
+  { name:"Café Bateel", city:"Dubai", country:"UAE", flag:"🇦🇪", type:"Cafes", network:"Bateel_Guest", password:"bateel2024", speed:"Fast", notes:"Password on receipt", lat:25.2048, lng:55.2708 },
+  { name:"Atlantis The Palm", city:"Palm Jumeirah", country:"UAE", flag:"🇦🇪", type:"Hotels", network:"Atlantis_Public", password:null, speed:"Fast", notes:"Beach & lobby areas", lat:25.1304, lng:55.1175 },
+  // 🇸🇦 Saudi Arabia
+  { name:"King Khalid International Airport", city:"Riyadh", country:"Saudi Arabia", flag:"🇸🇦", type:"Airport", network:"RUH_WiFi_Free", password:null, speed:"Fast", notes:"Sign in with phone", lat:24.9576, lng:46.6988 },
+  { name:"King Fahd International Airport", city:"Dammam", country:"Saudi Arabia", flag:"🇸🇦", type:"Airport", network:"KFIA_Free", password:null, speed:"Medium", notes:"Free, 1hr captive portal sessions", lat:26.4712, lng:49.7979 },
+  { name:"Mall of Arabia", city:"Jeddah", country:"Saudi Arabia", flag:"🇸🇦", type:"Malls", network:"MoA_Guest", password:null, speed:"Medium", notes:"Captive portal, 3hr limit", lat:21.5169, lng:39.1727 },
+  { name:"Starbucks Riyadh", city:"Riyadh", country:"Saudi Arabia", flag:"🇸🇦", type:"Cafes", network:"Google Starbucks", password:null, speed:"Fast", notes:"Multiple locations across KSA", lat:24.7136, lng:46.6753 },
+  // 🇬🇧 UK
+  { name:"Heathrow Airport", city:"London", country:"UK", flag:"🇬🇧", type:"Airport", network:"Heathrow Free WiFi", password:null, speed:"Fast", notes:"Unlimited, email registration", lat:51.4700, lng:-0.4543 },
+  { name:"Gatwick Airport", city:"London", country:"UK", flag:"🇬🇧", type:"Airport", network:"Gatwick WiFi", password:null, speed:"Fast", notes:"1hr free then ad-supported", lat:51.1481, lng:-0.1903 },
+  { name:"McDonald's London", city:"London", country:"UK", flag:"🇬🇧", type:"Cafes", network:"McD Free WiFi", password:null, speed:"Fast", notes:"All UK locations, no registration", lat:51.5139, lng:-0.1278 },
+  { name:"Starbucks London", city:"London", country:"UK", flag:"🇬🇧", type:"Cafes", network:"_The Cloud", password:null, speed:"Fast", notes:"Via The Cloud provider, all UK", lat:51.5074, lng:-0.1278 },
+  { name:"Costa Coffee UK", city:"London", country:"UK", flag:"🇬🇧", type:"Cafes", network:"Costa_WiFi", password:null, speed:"Medium", notes:"Register once, use everywhere", lat:51.5100, lng:-0.1300 },
+  { name:"Westfield London", city:"Shepherd's Bush", country:"UK", flag:"🇬🇧", type:"Malls", network:"Westfield_Free", password:null, speed:"Medium", notes:"Captive portal, unlimited", lat:51.5074, lng:-0.2217 },
+  { name:"British Library", city:"London", country:"UK", flag:"🇬🇧", type:"Libraries", network:"BL_PublicWiFi", password:null, speed:"Fast", notes:"Free, reading rooms & cafe areas", lat:51.5298, lng:-0.1276 },
+  { name:"The Savoy Hotel Lobby", city:"London", country:"UK", flag:"🇬🇧", type:"Hotels", network:"Savoy_Public", password:null, speed:"Fast", notes:"Lobby access, no room needed", lat:51.5104, lng:-0.1201 },
+  // 🇫🇷 France
+  { name:"Charles de Gaulle Airport", city:"Paris", country:"France", flag:"🇫🇷", type:"Airport", network:"CDG_WIFI_FREE", password:null, speed:"Fast", notes:"2hr free sessions, renewable", lat:49.0097, lng:2.5479 },
+  { name:"Café de Flore", city:"Paris", country:"France", flag:"🇫🇷", type:"Cafes", network:"CafeDeFlore_Wifi", password:"flore75006", speed:"Medium", notes:"Password on menu", lat:48.8539, lng:2.3328 },
+  { name:"McDonald's France", city:"Paris", country:"France", flag:"🇫🇷", type:"Cafes", network:"McD Free WiFi", password:null, speed:"Fast", notes:"All French locations", lat:48.8566, lng:2.3522 },
+  { name:"Galeries Lafayette", city:"Paris", country:"France", flag:"🇫🇷", type:"Malls", network:"GL_FreeWifi", password:null, speed:"Medium", notes:"All floors, captive portal", lat:48.8738, lng:2.3320 },
+  { name:"Bibliothèque nationale de France", city:"Paris", country:"France", flag:"🇫🇷", type:"Libraries", network:"BnF_Public", password:null, speed:"Fast", notes:"Public reading rooms", lat:48.8330, lng:2.3453 },
+  // 🇩🇪 Germany
+  { name:"Frankfurt Airport", city:"Frankfurt", country:"Germany", flag:"🇩🇪", type:"Airport", network:"Fraport_FreeWiFi", password:null, speed:"Fast", notes:"1hr free, then Telekom Hotspot paid", lat:50.0379, lng:8.5622 },
+  { name:"Berlin Brandenburg Airport", city:"Berlin", country:"Germany", flag:"🇩🇪", type:"Airport", network:"BER_FreeWifi", password:null, speed:"Fast", notes:"Unlimited free sessions", lat:52.3667, lng:13.5033 },
+  { name:"Starbucks Germany", city:"Berlin", country:"Germany", flag:"🇩🇪", type:"Cafes", network:"Telekom_Hotspot", password:null, speed:"Fast", notes:"Via Deutsche Telekom, all locations", lat:52.5200, lng:13.4050 },
+  { name:"CentrO Oberhausen", city:"Oberhausen", country:"Germany", flag:"🇩🇪", type:"Malls", network:"CentrO_Free", password:null, speed:"Medium", notes:"Largest mall in Germany, captive portal", lat:51.4900, lng:6.8600 },
+  // 🇺🇸 USA
+  { name:"JFK International Airport", city:"New York", country:"USA", flag:"🇺🇸", type:"Airport", network:"JFK_Free_WiFi", password:null, speed:"Fast", notes:"Unlimited, sign in with email", lat:40.6413, lng:-73.7781 },
+  { name:"LAX Airport", city:"Los Angeles", country:"USA", flag:"🇺🇸", type:"Airport", network:"LAX Free WiFi", password:null, speed:"Fast", notes:"All terminals, unlimited", lat:33.9416, lng:-118.4085 },
+  { name:"O'Hare International Airport", city:"Chicago", country:"USA", flag:"🇺🇸", type:"Airport", network:"ORD_Guest_WiFi", password:null, speed:"Fast", notes:"Free unlimited", lat:41.9742, lng:-87.9073 },
+  { name:"Starbucks USA", city:"New York", country:"USA", flag:"🇺🇸", type:"Cafes", network:"Google Starbucks", password:null, speed:"Fast", notes:"All US locations, Google login", lat:40.7580, lng:-73.9855 },
+  { name:"McDonald's USA", city:"New York", country:"USA", flag:"🇺🇸", type:"Cafes", network:"McD Free WiFi", password:null, speed:"Fast", notes:"Nationwide, no registration", lat:40.7549, lng:-73.9840 },
+  { name:"New York Public Library", city:"New York", country:"USA", flag:"🇺🇸", type:"Libraries", network:"NYPL_WiFi", password:null, speed:"Fast", notes:"All branches, unlimited", lat:40.7532, lng:-73.9822 },
+  { name:"Mall of America", city:"Bloomington MN", country:"USA", flag:"🇺🇸", type:"Malls", network:"MOA_FreeWiFi", password:null, speed:"Fast", notes:"All floors, captive portal", lat:44.8541, lng:-93.2422 },
+  { name:"Marriott Lobby Times Square", city:"New York", country:"USA", flag:"🇺🇸", type:"Hotels", network:"Marriott_Public", password:null, speed:"Fast", notes:"Lobby open to public", lat:40.7590, lng:-73.9845 },
+  // 🇯🇵 Japan
+  { name:"Narita International Airport", city:"Tokyo", country:"Japan", flag:"🇯🇵", type:"Airport", network:"NRT_FREE_Wi-Fi", password:null, speed:"Fast", notes:"Unlimited, registration via app", lat:35.7720, lng:140.3929 },
+  { name:"Haneda Airport", city:"Tokyo", country:"Japan", flag:"🇯🇵", type:"Airport", network:"HND_FREE_Wi-Fi", password:null, speed:"Fast", notes:"All terminals, 14-day access", lat:35.5494, lng:139.7798 },
+  { name:"7-Eleven Japan WiFi", city:"Tokyo", country:"Japan", flag:"🇯🇵", type:"Cafes", network:"7SPOT", password:null, speed:"Medium", notes:"Register once, 60min per session", lat:35.6897, lng:139.6922 },
+  { name:"Dotour Coffee", city:"Tokyo", country:"Japan", flag:"🇯🇵", type:"Cafes", network:"Dotour_WiFi", password:null, speed:"Medium", notes:"Nationwide chain, some locations", lat:35.6812, lng:139.7671 },
+  { name:"Shibuya 109", city:"Tokyo", country:"Japan", flag:"🇯🇵", type:"Malls", network:"Shibuya109_Free", password:null, speed:"Medium", notes:"Captive portal, tourist-friendly", lat:35.6598, lng:139.6981 },
+  { name:"Tokyo Metropolitan Library", city:"Tokyo", country:"Japan", flag:"🇯🇵", type:"Libraries", network:"TMLib_WiFi", password:null, speed:"Fast", notes:"All reading areas", lat:35.7190, lng:139.7230 },
+  // 🇸🇬 Singapore
+  { name:"Changi Airport", city:"Singapore", country:"Singapore", flag:"🇸🇬", type:"Airport", network:"Changi WiFi", password:null, speed:"Fast", notes:"Best airport WiFi in the world, unlimited", lat:1.3644, lng:103.9915 },
+  { name:"VivoCity", city:"Singapore", country:"Singapore", flag:"🇸🇬", type:"Malls", network:"VivoCity_Free", password:null, speed:"Fast", notes:"Captive portal, unlimited", lat:1.2644, lng:103.8222 },
+  { name:"Toast Box", city:"Singapore", country:"Singapore", flag:"🇸🇬", type:"Cafes", network:"ToastBox_WiFi", password:null, speed:"Medium", notes:"All outlets across Singapore", lat:1.2966, lng:103.8344 },
+  { name:"National Library Board", city:"Singapore", country:"Singapore", flag:"🇸🇬", type:"Libraries", network:"NLB_WiFi", password:null, speed:"Fast", notes:"All branches, free with registration", lat:1.2966, lng:103.8544 },
+  { name:"Marina Bay Sands", city:"Singapore", country:"Singapore", flag:"🇸🇬", type:"Hotels", network:"MBS_Public", password:null, speed:"Fast", notes:"Shops & promenade areas free", lat:1.2834, lng:103.8607 },
+  // 🇦🇺 Australia
+  { name:"Sydney Airport", city:"Sydney", country:"Australia", flag:"🇦🇺", type:"Airport", network:"SYD_FreeWiFi", password:null, speed:"Fast", notes:"2hr free, renewable", lat:-33.9399, lng:151.1753 },
+  { name:"Melbourne Airport", city:"Melbourne", country:"Australia", flag:"🇦🇺", type:"Airport", network:"MEL_FreeWiFi", password:null, speed:"Fast", notes:"Unlimited free", lat:-37.6690, lng:144.8410 },
+  { name:"Gloria Jean's Coffees", city:"Sydney", country:"Australia", flag:"🇦🇺", type:"Cafes", network:"GJC_WiFi", password:null, speed:"Medium", notes:"Most Australian locations", lat:-33.8688, lng:151.2093 },
+  { name:"Westfield Sydney", city:"Sydney", country:"Australia", flag:"🇦🇺", type:"Malls", network:"Westfield_Free", password:null, speed:"Medium", notes:"Captive portal, all levels", lat:-33.8726, lng:151.2069 },
+  { name:"State Library of NSW", city:"Sydney", country:"Australia", flag:"🇦🇺", type:"Libraries", network:"SLNSW_Public", password:null, speed:"Fast", notes:"All public areas", lat:-33.8688, lng:151.2119 },
+  // 🇮🇳 India
+  { name:"Indira Gandhi International Airport", city:"New Delhi", country:"India", flag:"🇮🇳", type:"Airport", network:"DEL_AirportWiFi", password:null, speed:"Fast", notes:"Free, OTP via phone", lat:28.5562, lng:77.1000 },
+  { name:"Chhatrapati Shivaji Airport", city:"Mumbai", country:"India", flag:"🇮🇳", type:"Airport", network:"BOM_FreeWiFi", password:null, speed:"Fast", notes:"Unlimited, OTP registration", lat:19.0896, lng:72.8656 },
+  { name:"Cafe Coffee Day", city:"Bengaluru", country:"India", flag:"🇮🇳", type:"Cafes", network:"CCD_WiFi", password:null, speed:"Medium", notes:"Most outlets, purchase required", lat:12.9716, lng:77.5946 },
+  { name:"Select Citywalk", city:"New Delhi", country:"India", flag:"🇮🇳", type:"Malls", network:"SelectCW_Free", password:null, speed:"Medium", notes:"Captive portal, 2hr sessions", lat:28.5288, lng:77.2191 },
+  { name:"Phoenix Palladium", city:"Mumbai", country:"India", flag:"🇮🇳", type:"Malls", network:"PhoenixMall_WiFi", password:null, speed:"Medium", notes:"Register with mobile", lat:18.9915, lng:72.8269 },
+  // 🇧🇷 Brazil
+  { name:"São Paulo–Guarulhos Airport", city:"São Paulo", country:"Brazil", flag:"🇧🇷", type:"Airport", network:"GRU_FreeWiFi", password:null, speed:"Fast", notes:"Unlimited, email registration", lat:-23.4356, lng:-46.4731 },
+  { name:"Shopping Iguatemi", city:"São Paulo", country:"Brazil", flag:"🇧🇷", type:"Malls", network:"Iguatemi_WiFi", password:null, speed:"Medium", notes:"Captive portal", lat:-23.5752, lng:-46.6903 },
+  { name:"McDonald's Brazil", city:"São Paulo", country:"Brazil", flag:"🇧🇷", type:"Cafes", network:"McD Free WiFi", password:null, speed:"Fast", notes:"All Brazilian locations", lat:-23.5505, lng:-46.6333 },
+  // 🇰🇷 South Korea
+  { name:"Incheon International Airport", city:"Seoul", country:"South Korea", flag:"🇰🇷", type:"Airport", network:"Incheon Airport WiFi", password:null, speed:"Fast", notes:"Blazing fast, unlimited", lat:37.4602, lng:126.4407 },
+  { name:"COEX Mall", city:"Seoul", country:"South Korea", flag:"🇰🇷", type:"Malls", network:"COEX_WiFi", password:null, speed:"Fast", notes:"Seoul public WiFi network", lat:37.5131, lng:127.0596 },
+  { name:"Ediya Coffee", city:"Seoul", country:"South Korea", flag:"🇰🇷", type:"Cafes", network:"Ediya_WiFi", password:null, speed:"Fast", notes:"All outlets nationwide", lat:37.5665, lng:126.9780 },
+  { name:"National Library of Korea", city:"Seoul", country:"South Korea", flag:"🇰🇷", type:"Libraries", network:"NLK_Public", password:null, speed:"Fast", notes:"All reading areas", lat:37.4796, lng:126.9770 },
+  // 🇮🇹 Italy
+  { name:"Rome Fiumicino Airport", city:"Rome", country:"Italy", flag:"🇮🇹", type:"Airport", network:"ADR WiFi", password:null, speed:"Fast", notes:"2hr free per device", lat:41.8003, lng:12.2389 },
+  { name:"McDonald's Italy", city:"Rome", country:"Italy", flag:"🇮🇹", type:"Cafes", network:"McD Free WiFi", password:null, speed:"Fast", notes:"ID registration required by law", lat:41.9028, lng:12.4964 },
+  { name:"La Rinascente", city:"Milan", country:"Italy", flag:"🇮🇹", type:"Malls", network:"Rinascente_Guest", password:null, speed:"Medium", notes:"Department store, all floors", lat:45.4654, lng:9.1905 },
+  // 🇳🇱 Netherlands
+  { name:"Amsterdam Schiphol Airport", city:"Amsterdam", country:"Netherlands", flag:"🇳🇱", type:"Airport", network:"Schiphol_Free_Wifi", password:null, speed:"Fast", notes:"Unlimited, best in Europe", lat:52.3086, lng:4.7639 },
+  { name:"Starbucks Amsterdam", city:"Amsterdam", country:"Netherlands", flag:"🇳🇱", type:"Cafes", network:"Google Starbucks", password:null, speed:"Fast", notes:"Google login", lat:52.3702, lng:4.8952 },
+  // 🇹🇭 Thailand
+  { name:"Suvarnabhumi Airport", city:"Bangkok", country:"Thailand", flag:"🇹🇭", type:"Airport", network:"True WiFi AOT", password:null, speed:"Fast", notes:"2hr free, then True Move H registration", lat:13.6900, lng:100.7501 },
+  { name:"CentralWorld", city:"Bangkok", country:"Thailand", flag:"🇹🇭", type:"Malls", network:"CentralWorld_Free", password:null, speed:"Medium", notes:"All floors, captive portal", lat:13.7465, lng:100.5392 },
+  { name:"Café Amazon", city:"Bangkok", country:"Thailand", flag:"🇹🇭", type:"Cafes", network:"CafeAmazon_Free", password:null, speed:"Medium", notes:"Nationwide chain, purchase needed", lat:13.7563, lng:100.5018 },
+  // 🇲🇾 Malaysia
+  { name:"KLIA Airport", city:"Kuala Lumpur", country:"Malaysia", flag:"🇲🇾", type:"Airport", network:"KLIA_FreeWiFi", password:null, speed:"Fast", notes:"All terminals, unlimited", lat:2.7456, lng:101.7099 },
+  { name:"Pavilion KL", city:"Kuala Lumpur", country:"Malaysia", flag:"🇲🇾", type:"Malls", network:"Pavilion_Free", password:null, speed:"Fast", notes:"Premium mall, fast speeds", lat:3.1489, lng:101.7132 },
+  { name:"Old Town White Coffee", city:"Kuala Lumpur", country:"Malaysia", flag:"🇲🇾", type:"Cafes", network:"OldTown_WiFi", password:null, speed:"Medium", notes:"All Malaysian outlets", lat:3.1478, lng:101.6953 },
+  // 🇿🇦 South Africa
+  { name:"OR Tambo International Airport", city:"Johannesburg", country:"South Africa", flag:"🇿🇦", type:"Airport", network:"ACSA_FreeWiFi", password:null, speed:"Medium", notes:"1hr free, Telkom portal", lat:-26.1367, lng:28.2411 },
+  { name:"V&A Waterfront", city:"Cape Town", country:"South Africa", flag:"🇿🇦", type:"Malls", network:"VAWaterfront_Free", password:null, speed:"Fast", notes:"Outdoor & indoor, all areas", lat:-33.9040, lng:18.4199 },
+  { name:"Vida e Caffè", city:"Cape Town", country:"South Africa", flag:"🇿🇦", type:"Cafes", network:"Vida_WiFi", password:null, speed:"Fast", notes:"Most Cape Town locations", lat:-33.9249, lng:18.4241 },
+  // 🇨🇦 Canada
+  { name:"Toronto Pearson Airport", city:"Toronto", country:"Canada", flag:"🇨🇦", type:"Airport", network:"GTAA_FreeWiFi", password:null, speed:"Fast", notes:"Unlimited, all terminals", lat:43.6777, lng:-79.6248 },
+  { name:"Vancouver International Airport", city:"Vancouver", country:"Canada", flag:"🇨🇦", type:"Airport", network:"YVR Free WiFi", password:null, speed:"Fast", notes:"Best airport WiFi in North America", lat:49.1967, lng:-123.1815 },
+  { name:"Tim Hortons", city:"Toronto", country:"Canada", flag:"🇨🇦", type:"Cafes", network:"TimHortons_WiFi", password:null, speed:"Fast", notes:"All Canadian locations", lat:43.6532, lng:-79.3832 },
+  { name:"Eaton Centre", city:"Toronto", country:"Canada", flag:"🇨🇦", type:"Malls", network:"EatonCentre_Free", password:null, speed:"Medium", notes:"Captive portal", lat:43.6544, lng:-79.3807 },
+  { name:"Toronto Public Library", city:"Toronto", country:"Canada", flag:"🇨🇦", type:"Libraries", network:"TPL_WiFi", password:null, speed:"Fast", notes:"All branches, unlimited", lat:43.6647, lng:-79.3998 },
+  // 🇪🇸 Spain
+  { name:"Barcelona El Prat Airport", city:"Barcelona", country:"Spain", flag:"🇪🇸", type:"Airport", network:"Aena_FreeWiFi", password:null, speed:"Fast", notes:"2hr sessions, renewable", lat:41.2974, lng:2.0833 },
+  { name:"El Corte Inglés", city:"Madrid", country:"Spain", flag:"🇪🇸", type:"Malls", network:"ECI_FreeWifi", password:null, speed:"Medium", notes:"All department stores nationwide", lat:40.4195, lng:-3.6916 },
+  { name:"McDonald's Spain", city:"Madrid", country:"Spain", flag:"🇪🇸", type:"Cafes", network:"McD Free WiFi", password:null, speed:"Fast", notes:"All Spanish locations", lat:40.4168, lng:-3.7038 },
+  // 🇹🇷 Turkey
+  { name:"Istanbul Airport", city:"Istanbul", country:"Turkey", flag:"🇹🇷", type:"Airport", network:"IST_FreeWiFi", password:null, speed:"Fast", notes:"World's busiest single-terminal airport, unlimited", lat:41.2753, lng:28.7519 },
+  { name:"Grand Bazaar", city:"Istanbul", country:"Turkey", flag:"🇹🇷", type:"Malls", network:"GrandBazaar_Free", password:null, speed:"Slow", notes:"Patchy but free throughout bazaar", lat:41.0107, lng:28.9682 },
+  { name:"Starbucks Turkey", city:"Istanbul", country:"Turkey", flag:"🇹🇷", type:"Cafes", network:"Starbucks_TR", password:null, speed:"Fast", notes:"All Turkish outlets", lat:41.0082, lng:28.9784 },
+];
+
+const CATEGORIES = ["All","Cafes","Malls","Hotels","Libraries","Airport"];
+const EMOJIS = { All:"📡", Cafes:"☕", Malls:"🏬", Hotels:"🏨", Libraries:"📚", Airport:"✈️" };
+const TYPE_COLORS = { Cafes:"#f59e42", Malls:"#a78bfa", Hotels:"#f472b6", Libraries:"#60a5fa", Airport:"#00d4aa" };
+const SPEED_COLORS = { Fast:"#00d4aa", Medium:"#f5a623", Slow:"#e05555" };
+
+let map, markersLayer=[], activeFilter="All", filtered=[], currentView="map", sidebarVisible=true;
+
+function initMap() {
+  map = L.map('map', { zoomControl:false, attributionControl:false }).setView([20,10], 2);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map);
+  L.control.zoom({ position:'topright' }).addTo(map);
+}
+
+function makeIcon(type) {
+  const color = TYPE_COLORS[type]||'#00d4aa';
+  const emoji = EMOJIS[type]||'📡';
+  return L.divIcon({
+    className:'',
+    html:`<div style="background:${color}22;border:2px solid ${color};border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.5);cursor:pointer;">${emoji}</div>`,
+    iconSize:[30,30], iconAnchor:[15,15], popupAnchor:[0,-17]
+  });
+}
+
+function renderMarkers() {
+  markersLayer.forEach(m => map.removeLayer(m));
+  markersLayer=[];
+  filtered.forEach((s,i) => {
+    const marker = L.marker([s.lat,s.lng], { icon:makeIcon(s.type) });
+    marker.addTo(map);
+    marker.bindPopup(`
+      <div class="popup-name">${s.flag} ${s.name}</div>
+      <div class="popup-loc">📍 ${s.city}, ${s.country}</div>
+      <div class="popup-net">📶 ${s.network}</div>
+      <div style="font-size:12px;color:${SPEED_COLORS[s.speed]}">⚡ ${s.speed} speed</div>
+      ${s.password?`<div class="popup-pwd">🔑 ${s.password}</div>`:''}
+      <div class="popup-notes">${s.notes}</div>
+    `, { maxWidth:240 });
+    marker.on('click', () => highlightCard(i));
+    markersLayer.push(marker);
+  });
+}
+
+function highlightCard(idx) {
+  document.querySelectorAll('.spot-card').forEach(c=>c.classList.remove('active'));
+  const card = document.getElementById('card-'+idx);
+  if (card) { card.classList.add('active'); card.scrollIntoView({ behavior:'smooth', block:'nearest' }); }
+}
+
+function populateCountries() {
+  const countries=[...new Set(SPOTS.map(s=>s.country))].sort();
+  const sel=document.getElementById("countrySelect");
+  const existing=new Set([...sel.options].map(o=>o.value));
+  countries.forEach(c => {
+    if(existing.has(c)) return;
+    const flag=SPOTS.find(s=>s.country===c).flag;
+    const opt=document.createElement("option");
+    opt.value=c; opt.textContent=`${flag} ${c}`;
+    sel.appendChild(opt);
+  });
+}
+
+function renderFilters() {
+  document.getElementById("filters").innerHTML=CATEGORIES.map(cat=>
+    `<button class="filter-btn ${cat===activeFilter?'active':''}" onclick="setFilter('${cat}')">${EMOJIS[cat]} ${cat}</button>`
+  ).join("");
+}
+
+function setFilter(cat) { activeFilter=cat; renderFilters(); filterSpots(); }
+
+function filterSpots() {
+  const q=document.getElementById("searchInput").value.toLowerCase();
+  const country=document.getElementById("countrySelect").value;
+  filtered=SPOTS.filter(s => {
+    const matchCat=activeFilter==="All"||s.type===activeFilter;
+    const matchQ=!q||s.name.toLowerCase().includes(q)||s.city.toLowerCase().includes(q)||s.network.toLowerCase().includes(q)||s.country.toLowerCase().includes(q);
+    const matchCountry=!country||s.country===country;
+    return matchCat&&matchQ&&matchCountry;
+  });
+  renderList();
+  renderMarkers();
+  updateStats();
+}
+
+function cardHTML(s,i) {
+  const tc=TYPE_COLORS[s.type]||'var(--teal)';
+  return `<div class="spot-card" id="card-${i}" onclick="focusSpot(${i})" style="animation-delay:${Math.min(i,20)*0.02}s">
+    <div class="spot-top">
+      <div class="spot-name">${s.flag} ${s.name}</div>
+      <div class="spot-badge" style="color:${tc};background:${tc}18;border:1px solid ${tc}33">${s.type}</div>
+    </div>
+    <div class="spot-loc">📍 ${s.city}, ${s.country}</div>
+    <div class="spot-meta">
+      <div class="meta-chip">📶 ${s.network}</div>
+      <div class="meta-chip" style="color:${SPEED_COLORS[s.speed]}">⚡ ${s.speed}</div>
+    </div>
+    ${s.password?`<div class="pwd">🔑 ${s.password}</div>`:''}
+  </div>`;
+}
+
+function renderList() {
+  const html=filtered.length ? filtered.map(cardHTML).join("") : `<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No spots found. Try different filters.</div>`;
+  document.getElementById("spotList").innerHTML=html;
+  document.getElementById("listView").innerHTML=html;
+}
+
+function focusSpot(idx) {
+  const s=filtered[idx]; if(!s) return;
+  if(currentView==='map') {
+    map.flyTo([s.lat,s.lng],14,{duration:1});
+    setTimeout(()=>markersLayer[idx]&&markersLayer[idx].openPopup(),1100);
+  }
+  document.querySelectorAll('.spot-card').forEach(c=>c.classList.remove('active'));
+  document.getElementById('card-'+idx)?.classList.add('active');
+}
+
+function updateStats() {
+  document.getElementById("statSpots").textContent=filtered.length;
+  const countries=new Set(filtered.map(s=>s.country));
+  document.getElementById("statCountries").textContent=countries.size;
+  document.getElementById("resultsInfo").textContent=`Showing ${filtered.length} spots in ${countries.size} ${countries.size===1?'country':'countries'}`;
+}
+
+function toggleSidebar() {
+  sidebarVisible=!sidebarVisible;
+  document.getElementById("sidebar").classList.toggle("collapsed",!sidebarVisible);
+  document.getElementById("toggleIcon").textContent=sidebarVisible?"◀":"▶";
+  document.getElementById("toggleLabel").textContent=sidebarVisible?"Hide Panel":"Show Panel";
+  setTimeout(()=>map.invalidateSize(),310);
+}
+
+function switchView(v) {
+  currentView=v;
+  document.getElementById("btnMap").classList.toggle("active",v==='map');
+  document.getElementById("btnList").classList.toggle("active",v==='list');
+  document.getElementById("mapWrap").style.display=v==='map'?'':'none';
+  document.getElementById("listView").style.display=v==='list'?'flex':'none';
+  document.getElementById("sidebar").style.display=v==='list'?'none':'';
+  document.getElementById("proTip").style.display=v==='list'?'':'none';
+  if(v==='map') setTimeout(()=>map.invalidateSize(),100);
+}
+
+// ── Groq integration ──────────────────────────────────────────────
+let groqKey = localStorage.getItem('groqKey') || '';
+if (groqKey) document.getElementById('groqKey').value = groqKey;
+
+function saveKey() {
+  groqKey = document.getElementById('groqKey').value.trim();
+  if (!groqKey) { setStatus('Please paste a valid Groq API key.', 'err'); return; }
+  localStorage.setItem('groqKey', groqKey);
+  setStatus('✓ Key saved! Now search any city.', 'ok');
+}
+
+function setStatus(msg, cls='') {
+  const el = document.getElementById('groqStatus');
+  el.textContent = msg;
+  el.className = 'groq-status' + (cls ? ' ' + cls : '');
+}
+
+async function searchGroq() {
+  const city = document.getElementById('groqCity').value.trim();
+  if (!groqKey) { setStatus('⚠ Save your Groq API key first.', 'err'); return; }
+  if (!city) { setStatus('⚠ Enter a city name to search.', 'err'); return; }
+
+  const btn = document.getElementById('groqBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Searching…';
+  setStatus(`Asking Groq about free WiFi in ${city}…`, 'loading');
+
+  const prompt = `You are a free WiFi location database. Return a JSON array of 8-12 real, well-known free WiFi spots in ${city}.
+Each object must have exactly these fields:
+- name: string (venue name)
+- city: string (neighborhood or district)
+- country: string (country name)
+- flag: string (country flag emoji)
+- type: one of exactly ["Cafes","Malls","Hotels","Libraries","Airport"]
+- network: string (WiFi network name, realistic)
+- password: string or null
+- speed: one of exactly ["Fast","Medium","Slow"]
+- notes: string (1 short tip, max 60 chars)
+- lat: number (accurate latitude)
+- lng: number (accurate longitude)
+
+Return ONLY the JSON array, no markdown, no explanation.`;
+
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.4,
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error?.message || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    let raw = data.choices[0].message.content.trim();
+    // strip possible markdown fences
+    raw = raw.replace(/^```[a-z]*\n?/i,'').replace(/```$/,'').trim();
+    const spots = JSON.parse(raw);
+
+    if (!Array.isArray(spots) || spots.length === 0) throw new Error('No spots returned.');
+
+    // Tag as AI-generated so we can style them
+    spots.forEach(s => { s._groq = true; });
+
+    // Add to SPOTS, avoiding duplicates by name+city
+    let added = 0;
+    spots.forEach(s => {
+      if (!SPOTS.find(x => x.name === s.name && x.city === s.city)) {
+        SPOTS.push(s);
+        added++;
+      }
+    });
+
+    // Add country to dropdown if new
+    populateCountries();
+
+    // Update filters & list
+    filterSpots();
+
+    // Fly map to the first result
+    if (added > 0 && spots[0].lat && spots[0].lng) {
+      map.flyTo([spots[0].lat, spots[0].lng], 12, { duration: 1.5 });
+    }
+
+    setStatus(`✓ Added ${added} new WiFi spots in ${city} from Groq!`, 'ok');
+  } catch (e) {
+    setStatus(`✗ ${e.message}`, 'err');
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ Find WiFi';
+  }
+}
+// ── end Groq ──────────────────────────────────────────────────────
+
+initMap();
+populateCountries();
+renderFilters();
+filterSpots();
+</script>
+</body>
+</html>
